@@ -1564,7 +1564,20 @@ void WalterModem::_cmdProcessingTask(void* args)
           }
         }
       } else if(qItem.rsp != NULL) {
-        _processModemRSP(_curCmd, qItem.rsp);
+        if(_curCmd != NULL) {
+          _processModemRSP(_curCmd, qItem.rsp);
+        } else {
+          /*
+           * A response arrived for a command that has already timed out,
+           * finished, and been cleared (_curCmd == NULL) — the command's
+           * retry budget gave up locally before the modem's real, valid
+           * reply made it back over UART. Dispatching it here would read
+           * through a null WalterModemCmd* and crash. Not this response's
+           * fault: just release it back to the buffer pool instead of
+           * processing it against a command that no longer exists.
+           */
+          qItem.rsp->free = true;
+        }
       }
     }
 
