@@ -1564,20 +1564,7 @@ void WalterModem::_cmdProcessingTask(void* args)
           }
         }
       } else if(qItem.rsp != NULL) {
-        if(_curCmd != NULL) {
-          _processModemRSP(_curCmd, qItem.rsp);
-        } else {
-          /*
-           * A response arrived for a command that has already timed out,
-           * finished, and been cleared (_curCmd == NULL) — the command's
-           * retry budget gave up locally before the modem's real, valid
-           * reply made it back over UART. Dispatching it here would read
-           * through a null WalterModemCmd* and crash. Not this response's
-           * fault: just release it back to the buffer pool instead of
-           * processing it against a command that no longer exists.
-           */
-          qItem.rsp->free = true;
-        }
+        _processModemRSP(_curCmd, qItem.rsp);
       }
     }
 
@@ -3554,7 +3541,20 @@ after_processing_logic:
    */
   if((cmd != NULL && cmd->atRsp != NULL && memcmp(cmd->atRsp, buff->data, cmd->atRspLen) == 0) ||
      result != WALTER_MODEM_STATE_OK) {
-    _finishModemCMD(cmd, result);
+    /*
+     * Guard against cmd == NULL: this block is also reached when
+     * result != WALTER_MODEM_STATE_OK, which can happen for a response
+     * that arrives after its command already timed out and was cleared
+     * (_curCmd == NULL, passed in here as cmd). _finishModemCMD would
+     * dereference cmd->rsp and crash (EXCVADDR 0x548 == offsetof(cmd,
+     * rsp)). There is no command left to finish, so just drop the stray
+     * response. All URC / idle-time side effects have already run above
+     * the after_processing_logic: label, so receive/subscribe is
+     * unaffected. See QuickSpot/walter-esp-idf#166.
+     */
+    if(cmd != NULL) {
+      _finishModemCMD(cmd, result);
+    }
     buff->free = true;
     return;
   }
